@@ -1,0 +1,69 @@
+# Atomify commands start with #/
+
+# Move camera to a nice position
+#/camera position 20 85 55
+#/camera viewcenter 20 20 10
+
+# Set atom size and color
+#/atom 1 1.0 #ffffff
+#/atom 2 1.0 #ff0000
+
+variable L equal 20.0
+variable Lhalf equal $(v_L/2)
+variable thickness equal 1.0
+variable T equal 1.7
+
+units lj
+atom_style atomic
+lattice fcc 0.5
+
+# Create regions to place atoms
+variable left equal 0.5*$L-0.5*${thickness}
+variable right equal 0.5*$L+0.5*${thickness}
+region system block 0 $L 0 ${Lhalf} 0 ${Lhalf}
+region boxinside block ${left} ${right} 0 $L 0 ${Lhalf}
+region boxoutside block ${left} ${right} 0 $L 0 ${Lhalf} side out
+
+# Create a box with 2 atom types in the region system
+create_box 2 system
+# Create atoms of type 1 inside the inner region
+create_atoms 1 region boxinside
+# Create atoms of type 2 inside the outer region
+create_atoms 2 region boxoutside
+
+# Set atom masses
+mass 1 1.0
+mass 2 10.0
+compute com all com
+# Give initial velocity, T, seed = 1337
+velocity all create $T 1337 loop geom
+
+# Choose LJ with 4.0 and 2.5 sigma cutoff
+pair_style lj/cut 4.0
+pair_coeff 1 1 1.0 1.0 4.0
+pair_coeff 1 2 1.0 1.0 4.0
+pair_coeff 2 2 1.0 1.0 2.5
+
+# Create two groups for computing diffusion coefficients
+group light type 1
+group heavy type 2
+
+#
+compute msd_light light msd com yes
+variable diffusion_coeff_light equal c_msd_light[4]/6/(step*dt+1.0e-6)
+
+compute msd_heavy heavy msd com yes
+variable diffusion_coeff_heavy equal c_msd_heavy[4]/6/(step*dt+1.0e-6)
+# neigh_modify every 1 delay 0 check yes
+fix 1 all nvt temp $T $T 1
+
+
+compute chunkID all chunk/atom bin/1d x lower 0.05 units reduced
+compute countLight light property/chunk chunkID count
+compute countHeavy heavy property/chunk chunkID count
+
+fix countDump all ave/time 100 10 1000 c_countLight c_countHeavy file count.txt mode vector
+
+
+run 100000
+
